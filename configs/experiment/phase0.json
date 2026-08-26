@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "corpus_size": 500,
+  "seed": 1729,
+  "budgets": [0.10, 0.25, 0.35, 0.50],
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "layouts": [
+    {"name": "g512_8x512", "global_capacity": 512, "tool_count": 8, "tool_capacity": 512},
+    {"name": "g512_8x1024", "global_capacity": 512, "tool_count": 8, "tool_capacity": 1024},
+    {"name": "g1024_16x2048", "global_capacity": 1024, "tool_count": 16, "tool_capacity": 2048}
+  ]
+}

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tool-context-attention"
+version = "0.1.0"
+description = "Backend-neutral contracts for hierarchical tool-context attention experiments"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[project.optional-dependencies]
+tokenizers = ["transformers>=4.56,<6"]
+retrieval = ["sentence-transformers>=5,<6"]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+tca-generate = "tool_context.cli:generate_main"
+tca-evaluate = "tool_context.cli:evaluate_main"
+tca-environment = "tool_context.cli:environment_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tool_context"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
