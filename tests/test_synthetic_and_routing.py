@@ -5,7 +5,10 @@ from pathlib import Path
 from tool_context.data.synthetic import DEFAULT_DISTRIBUTION, corpus_manifest, generate_corpus, read_corpus
 from tool_context.eval.routing import evaluate_selectors, support_recalled
 from tool_context.packing import ByteTokenizer
-from tool_context.routing import BM25Selector, DenseSelector, EmbeddingSelector, OracleSelector, RandomSelector
+from tool_context.routing import (
+    BM25Selector, DenseSelector, EmbeddingSelector, MetadataProbeSelector,
+    OracleSelector, RandomSelector, SurfaceProbeSelector,
+)
 
 
 class KeywordEncoder:
@@ -25,6 +28,9 @@ def test_default_corpus_distribution_splits_and_determinism():
     counts = Counter(e.template_family.split("/")[0] for e in first)
     assert counts == Counter(DEFAULT_DISTRIBUTION)
     assert Counter(e.metadata["split"] for e in first) == {"development": 400, "held_out": 100}
+    development = {e.metadata["template_variant"] for e in first if e.metadata["split"] == "development"}
+    held_out = {e.metadata["template_variant"] for e in first if e.metadata["split"] == "held_out"}
+    assert development.isdisjoint(held_out)
 
 
 def test_randomized_identifiers_do_not_encode_relevance():
@@ -47,6 +53,14 @@ def test_selectors_share_evaluation_interface_and_controls_recall_perfectly():
     assert metrics["dense"]["0.25"]["aggregate"]["support_recall"] == 1.0
     assert metrics["oracle"]["0.25"]["aggregate"]["no_tool_false_positive_rate"] == 0.0
     assert metrics["dense"]["0.25"]["aggregate"]["mean_opened_token_fraction"] == 1.0
+
+
+def test_held_out_metadata_and_surface_probes_cannot_solve_the_corpus():
+    episodes = generate_corpus()
+    selectors = [MetadataProbeSelector(), SurfaceProbeSelector()]
+    metrics = evaluate_selectors(episodes, selectors, ByteTokenizer(), budgets=(0.25,))
+    for selector in selectors:
+        assert metrics[selector.name]["0.25"]["splits"]["held_out"]["support_recall"] < 0.50
 
 
 def test_support_sets_allow_multiple_valid_evidence_sets():

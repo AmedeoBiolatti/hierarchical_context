@@ -13,12 +13,14 @@ dependencies = []
 [project.optional-dependencies]
 tokenizers = ["transformers>=4.56,<6"]
 retrieval = ["sentence-transformers>=5,<6"]
+kernel = ["torch>=2.13,<2.14"]
 dev = ["pytest>=8,<10"]
 
 [project.scripts]
 tca-generate = "tool_context.cli:generate_main"
 tca-evaluate = "tool_context.cli:evaluate_main"
 tca-environment = "tool_context.cli:environment_main"
+tca-bench-attention = "tool_context.cli:benchmark_attention_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tool_context"]
@@ -26,4 +28,3 @@ packages = ["src/tool_context"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

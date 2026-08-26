@@ -1,0 +1,16 @@
+{
+  "seed": 1729,
+  "dtype": "bfloat16",
+  "batch_size": 1,
+  "query_heads": 16,
+  "kv_heads": 8,
+  "head_dim": 128,
+  "warmups": 10,
+  "repetitions": 30,
+  "layouts": [
+    {"name": "bench_4k", "total_tokens": 4096, "global_capacity": 512, "tool_count": 8, "tool_capacity": 384},
+    {"name": "bench_8k", "total_tokens": 8192, "global_capacity": 512, "tool_count": 8, "tool_capacity": 896},
+    {"name": "bench_16k", "total_tokens": 16384, "global_capacity": 512, "tool_count": 8, "tool_capacity": 1920},
+    {"name": "bench_32k", "total_tokens": 32768, "global_capacity": 512, "tool_count": 8, "tool_capacity": 3968}
+  ]
+}

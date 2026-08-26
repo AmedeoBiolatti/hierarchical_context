@@ -10,7 +10,7 @@ from .packing import ByteTokenizer, HuggingFaceTokenizer
 from .reporting import environment_metadata, result_document, write_json
 from .routing import (
     DEFAULT_MINILM_REVISION, BM25Selector, DenseSelector, EmbeddingSelector,
-    MiniLMEncoder, OracleSelector, RandomSelector,
+    MetadataProbeSelector, MiniLMEncoder, OracleSelector, RandomSelector, SurfaceProbeSelector,
 )
 
 
@@ -39,14 +39,20 @@ def evaluate_main(argv: list[str] | None = None) -> None:
 
     episodes = read_corpus(args.corpus)
     tokenizer = ByteTokenizer() if args.tokenizer == "byte" else HuggingFaceTokenizer()
-    selectors = [RandomSelector(), BM25Selector(), OracleSelector(), DenseSelector()]
+    selectors = [
+        RandomSelector(), MetadataProbeSelector(), SurfaceProbeSelector(),
+        BM25Selector(), OracleSelector(), DenseSelector(),
+    ]
     identities: dict[str, object] = {
-        "random": {"kind": "seeded_random"}, "bm25": {"kind": "local_bm25", "k1": 1.5, "b": 0.75},
+        "random": {"kind": "seeded_random"},
+        "metadata_probe": {"kind": "leakage_probe", "features": "ids_and_invariant_metadata"},
+        "surface_probe": {"kind": "leakage_probe", "features": "length_and_punctuation"},
+        "bm25": {"kind": "local_bm25", "k1": 1.5, "b": 0.75},
         "oracle": {"kind": "gold_support"}, "dense": {"kind": "all_blocks"},
     }
     if not args.skip_embeddings:
         encoder = MiniLMEncoder(args.embedding_model, args.embedding_revision)
-        selectors.insert(2, EmbeddingSelector(encoder))
+        selectors.insert(4, EmbeddingSelector(encoder))
         identities["minilm"] = encoder.identity
     metrics = evaluate_selectors(episodes, selectors, tokenizer, args.budget)
     document = result_document(
@@ -62,3 +68,14 @@ def environment_main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     write_json(args.output, {"result_schema_version": 1, "environment": environment_metadata()})
+
+
+def benchmark_attention_main(argv: list[str] | None = None) -> None:
+    from .benchmarking import load_benchmark_config, run_phase1_benchmarks
+
+    parser = argparse.ArgumentParser(description="Benchmark Phase 1 sparse attention backends")
+    parser.add_argument("--config", default="configs/experiment/phase1.json")
+    parser.add_argument("--output", default="artifacts/phase1_attention.json")
+    args = parser.parse_args(argv)
+    result = run_phase1_benchmarks(load_benchmark_config(args.config), args.output)
+    print(json.dumps(result["decision"], indent=2, sort_keys=True))

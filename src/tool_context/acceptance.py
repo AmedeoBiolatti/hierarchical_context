@@ -41,6 +41,16 @@ def assess_phase0(report: Mapping[str, Any]) -> dict[str, Any]:
     tokenizer_revision = report.get("tokenizer", {}).get("revision")
     if not tokenizer_revision:
         failures.append("tokenizer revision was not resolved")
+    leakage_recall: dict[str, float] = {}
+    for selector in ("metadata_probe", "surface_probe"):
+        try:
+            recall = float(metrics[selector]["0.25"]["splits"]["held_out"]["support_recall"])
+        except KeyError:
+            failures.append(f"missing {selector} metrics")
+            continue
+        leakage_recall[selector] = recall
+        if recall >= 0.50:
+            failures.append(f"{selector} held-out leakage recall is {recall}, expected < 0.50")
     return {
         "passed": not failures,
         "failures": failures,
@@ -49,6 +59,44 @@ def assess_phase0(report: Mapping[str, Any]) -> dict[str, Any]:
             "oracle_hard_recall_at_25pct": oracle_hard,
             "conventional_hard_recall_at_25pct": conventional_hard,
             "tokenizer_revision": tokenizer_revision,
+            "leakage_probe_support_recall_at_25pct": leakage_recall,
         },
     }
 
+
+def assess_phase1(report: Mapping[str, Any]) -> dict[str, Any]:
+    failures: list[str] = []
+    if not report.get("correctness", {}).get("passed"):
+        failures.append("Phase 1 correctness tests did not pass")
+    rows = report.get("benchmarks", [])
+
+    def median(backend: str, length: int) -> float | None:
+        for row in rows:
+            if row.get("backend") == backend and row.get("sequence_length") == length and row.get("status") == "ok":
+                return float(row["timing"]["median_ms"])
+        return None
+
+    speedups: dict[str, float | None] = {}
+    for length, threshold in ((16384, 1.25), (32768, 1.5)):
+        dense = median("dense_causal", length); flex = median("flex_selected_0.25", length)
+        speedup = dense / flex if dense is not None and flex else None
+        speedups[str(length)] = speedup
+    speed_pass = any(
+        speedups[str(length)] is not None and speedups[str(length)] >= threshold
+        for length, threshold in ((16384, 1.25), (32768, 1.5))
+    )
+    dense_oom_lengths = {
+        int(row["sequence_length"]) for row in rows
+        if row.get("backend") == "dense_causal" and row.get("status") == "oom"
+    }
+    flex_lengths = {
+        int(row["sequence_length"]) for row in rows
+        if row.get("backend") == "flex_selected_0.25" and row.get("status") == "ok"
+    }
+    memory_pass = bool(dense_oom_lengths & flex_lengths)
+    if not speed_pass and not memory_pass:
+        failures.append("no 16K/32K speed crossover or same-shape memory feasibility win")
+    return {
+        "passed": not failures, "failures": failures,
+        "observed": {"speedups": speedups, "memory_feasibility_lengths": sorted(dense_oom_lengths & flex_lengths)},
+    }

@@ -7,7 +7,7 @@ import random
 import re
 from typing import Any, Protocol, Sequence
 
-from .schema import EpisodeGraph, ToolBlock
+from .schema import EpisodeGraph, ToolBlock, canonical_json
 
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
@@ -39,6 +39,44 @@ class RandomSelector:
         seed = int.from_bytes(hashlib.sha256(f"{episode.seed}:random".encode()).digest()[:8], "big")
         rng = random.Random(seed); ids = [block.block_id for block in episode.tool_blocks]; rng.shuffle(ids)
         return tuple(RankedBlock(block_id, float(len(ids) - i)) for i, block_id in enumerate(ids))
+
+
+class MetadataProbeSelector:
+    """Leakage probe restricted to opaque IDs and invariant block metadata."""
+
+    name = "metadata_probe"
+    ignores_budget = False
+
+    def rank(self, episode: EpisodeGraph) -> tuple[RankedBlock, ...]:
+        ranked = []
+        for block in episode.tool_blocks:
+            payload = canonical_json({
+                "block_id": block.block_id,
+                "tool_type": block.tool_type,
+                "metadata": dict(block.invariant_metadata),
+                "version": block.version,
+            })
+            score = int.from_bytes(hashlib.sha256(payload.encode()).digest()[:8], "big")
+            ranked.append(RankedBlock(block.block_id, float(score)))
+        return tuple(sorted(ranked, key=lambda item: (-item.score, item.block_id)))
+
+
+class SurfaceProbeSelector:
+    """Leakage probe using only content length and punctuation counts."""
+
+    name = "surface_probe"
+    ignores_budget = False
+
+    def rank(self, episode: EpisodeGraph) -> tuple[RankedBlock, ...]:
+        ranked = []
+        for block in episode.tool_blocks:
+            text = block.content
+            features = (len(text), text.count("|"), text.count("="), text.count(";"), text.count("."))
+            payload = canonical_json(features)
+            tie_break = int.from_bytes(hashlib.sha256(payload.encode()).digest()[:4], "big") / 2**32
+            score = float(sum((index + 1) * value for index, value in enumerate(features))) + tie_break
+            ranked.append(RankedBlock(block.block_id, score))
+        return tuple(sorted(ranked, key=lambda item: (-item.score, item.block_id)))
 
 
 class BM25Selector:

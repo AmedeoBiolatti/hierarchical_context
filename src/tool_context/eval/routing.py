@@ -45,6 +45,7 @@ def evaluate_selectors(
         for budget in budgets:
             aggregate = _empty_metrics()
             families: dict[str, dict[str, float]] = defaultdict(_empty_metrics)
+            splits: dict[str, dict[str, float]] = defaultdict(_empty_metrics)
             for episode in episodes:
                 ranking = selector.rank(episode)
                 selected = select_under_budget(
@@ -55,7 +56,8 @@ def evaluate_selectors(
                 opened = sum(counts[block_id] for block_id in selected)
                 available = sum(counts.values())
                 family = episode.template_family.split("/")[0]
-                for metrics in (aggregate, families[family]):
+                split = str(episode.metadata.get("split", "unspecified"))
+                for metrics in (aggregate, families[family], splits[split]):
                     metrics["episodes"] += 1
                     metrics["support_recalled"] += float(support_recalled(episode, selected))
                     metrics["opened_token_fraction_sum"] += opened / available if available else 0.0
@@ -66,7 +68,7 @@ def evaluate_selectors(
             budget_results[f"{budget:.2f}"] = {
                 "aggregate": _finalize(aggregate),
                 "families": {name: _finalize(raw) for name, raw in sorted(families.items())},
+                "splits": {name: _finalize(raw) for name, raw in sorted(splits.items())},
             }
         results[selector.name] = budget_results
     return results
-

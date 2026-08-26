@@ -1,4 +1,4 @@
-from tool_context.acceptance import assess_phase0
+from tool_context.acceptance import assess_phase0, assess_phase1
 
 
 def family(episodes, recall):
@@ -22,9 +22,29 @@ def test_phase0_acceptance_gate_reports_decisive_metrics():
                 "0.25": {"families": hard},
             },
             "minilm": {"0.25": {"families": hard}},
+            "metadata_probe": {"0.25": {"splits": {"held_out": {"support_recall": 0.2}}}},
+            "surface_probe": {"0.25": {"splits": {"held_out": {"support_recall": 0.3}}}},
         },
     }
     result = assess_phase0(report)
     assert result["passed"]
     assert result["observed"]["oracle_hard_recall_at_25pct"] == 1.0
 
+
+def test_phase1_acceptance_uses_25_percent_selected_speedup():
+    report = {
+        "correctness": {"passed": True},
+        "benchmarks": [
+            {"backend": "dense_causal", "sequence_length": 16384, "status": "ok", "timing": {"median_ms": 10.0}},
+            {"backend": "flex_selected_0.25", "sequence_length": 16384, "status": "ok", "timing": {"median_ms": 7.5}},
+        ],
+    }
+    result = assess_phase1(report)
+    assert result["passed"]
+    assert result["observed"]["speedups"]["16384"] == 10 / 7.5
+
+
+def test_phase1_acceptance_rejects_missing_correctness_and_crossover():
+    result = assess_phase1({"correctness": {"passed": False}, "benchmarks": []})
+    assert not result["passed"]
+    assert len(result["failures"]) == 2
