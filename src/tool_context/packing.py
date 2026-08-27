@@ -134,6 +134,32 @@ class PackedEpisode:
         return canonical_json(self.to_dict())
 
 
+@dataclass(frozen=True, slots=True)
+class TeacherForcedEpisode:
+    packed: PackedEpisode
+    target_positions: tuple[int, ...]
+    prediction_positions: tuple[int, ...]
+    target_token_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.target_positions:
+            raise ValidationError("teacher-forced episode must contain at least one answer target")
+        if not (
+            len(self.target_positions) == len(self.prediction_positions) == len(self.target_token_ids)
+        ):
+            raise ValidationError("teacher-forced target arrays must have equal length")
+        length = self.packed.layout.sequence_length
+        for target, prediction in zip(self.target_positions, self.prediction_positions, strict=True):
+            if not 0 <= prediction < target < length:
+                raise ValidationError("teacher-forced prediction positions must immediately precede valid targets")
+            if target - prediction != 1:
+                raise ValidationError("teacher-forced prediction position must immediately precede its target")
+            if self.packed.token_role[prediction] != TokenRole.A or not self.packed.valid_token[prediction]:
+                raise ValidationError("teacher-forced prediction queries must be valid answer tokens")
+            if self.packed.token_role[target] != TokenRole.A or not self.packed.valid_token[target]:
+                raise ValidationError("teacher-forced targets must be valid answer tokens")
+
+
 def _tool_text(block: Any) -> str:
     header = canonical_json({
         "tool_type": block.tool_type,
@@ -151,6 +177,9 @@ def pack_episode(
     *,
     selected_blocks: Iterable[str] | None = None,
     placeholder_token_id: int = 0,
+    answer_prefix: str = "",
+    enable_memory_tokens: bool = True,
+    enable_router_tokens: bool = True,
 ) -> PackedEpisode:
     if len(episode.tool_blocks) > layout.tool_count:
         raise ValidationError(
@@ -213,9 +242,10 @@ def pack_episode(
 
     memory_ids: list[int] = []
     memory_blocks: list[str] = []
-    for block in episode.tool_blocks:
-        memory_ids.extend([placeholder_token_id] * layout.memory_tokens_per_block)
-        memory_blocks.extend([block.block_id] * layout.memory_tokens_per_block)
+    if enable_memory_tokens:
+        for block in episode.tool_blocks:
+            memory_ids.extend([placeholder_token_id] * layout.memory_tokens_per_block)
+            memory_blocks.extend([block.block_id] * layout.memory_tokens_per_block)
     for local, (token_id, memory_block) in enumerate(zip(memory_ids, memory_blocks, strict=True)):
         block_local = local % layout.memory_tokens_per_block
         ids.append(token_id); roles.append(TokenRole.M); block_ids.append(memory_block)
@@ -227,12 +257,11 @@ def pack_episode(
     event_positions.extend([-1] * memory_padding); selections.extend([False] * memory_padding)
     valid.extend([False] * memory_padding); anchor_keys.extend([False] * memory_padding)
 
+    router_ids = [placeholder_token_id] * layout.router_capacity if enable_router_tokens else []
+    append_region(router_ids, layout.router_strip_capacity, TokenRole.R, event_position=layout.tool_count + 1)
+    answer_ids = list(tokenizer.encode(answer_prefix)) + list(tokenizer.encode(episode.expected_answer))
     append_region(
-        [placeholder_token_id] * layout.router_capacity,
-        layout.router_strip_capacity, TokenRole.R, event_position=layout.tool_count + 1,
-    )
-    append_region(
-        tokenizer.encode(episode.expected_answer), layout.answer_strip_capacity,
+        answer_ids, layout.answer_strip_capacity,
         TokenRole.A, event_position=layout.tool_count + 2,
     )
 
@@ -243,6 +272,38 @@ def pack_episode(
         event_position=tuple(event_positions), selected_block=tuple(selections),
         valid_token=tuple(valid), episode_anchor_key=tuple(anchor_keys),
     )
+
+
+def pack_teacher_forcing_episode(
+    episode: EpisodeGraph,
+    layout: LayoutSpec,
+    tokenizer: Tokenizer,
+    *,
+    selected_blocks: Iterable[str] | None = None,
+    answer_prefix: str = "\nAnswer: ",
+    placeholder_token_id: int = 0,
+    enable_memory_tokens: bool = True,
+    enable_router_tokens: bool = True,
+) -> TeacherForcedEpisode:
+    prefix_ids = tuple(int(item) for item in tokenizer.encode(answer_prefix))
+    target_ids = tuple(int(item) for item in tokenizer.encode(episode.expected_answer))
+    if not prefix_ids:
+        raise ValidationError("answer_prefix must tokenize to at least one token")
+    if not target_ids:
+        raise ValidationError("expected_answer must tokenize to at least one token")
+    packed = pack_episode(
+        episode, layout, tokenizer, selected_blocks=selected_blocks,
+        placeholder_token_id=placeholder_token_id, answer_prefix=answer_prefix,
+        enable_memory_tokens=enable_memory_tokens, enable_router_tokens=enable_router_tokens,
+    )
+    answer_start = (
+        layout.global_capacity + layout.tool_count * layout.tool_capacity
+        + layout.summary_capacity + layout.router_strip_capacity
+    )
+    target_start = answer_start + len(prefix_ids)
+    target_positions = tuple(range(target_start, target_start + len(target_ids)))
+    prediction_positions = tuple(position - 1 for position in target_positions)
+    return TeacherForcedEpisode(packed, target_positions, prediction_positions, target_ids)
 
 
 def known_index(episode: EpisodeGraph, block_id: str) -> int:

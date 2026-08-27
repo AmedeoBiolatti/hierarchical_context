@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import OrderedDict
 import hashlib
 import json
 from typing import Sequence
@@ -123,12 +124,17 @@ def mask_mod_from_metadata(metadata: TensorMaskMetadata, options: MaskOptions = 
     return mask_mod
 
 
-_BLOCK_MASK_CACHE: dict[tuple[object, ...], BlockMask] = {}
+_BLOCK_MASK_CACHE: OrderedDict[tuple[object, ...], BlockMask] = OrderedDict()
+_BLOCK_MASK_CACHE_LIMIT = 64
 _COMPILED_CREATE_BLOCK_MASK = torch.compile(create_block_mask, fullgraph=True, dynamic=False)
 
 
 def clear_block_mask_cache() -> None:
     _BLOCK_MASK_CACHE.clear()
+
+
+def block_mask_cache_size() -> int:
+    return len(_BLOCK_MASK_CACHE)
 
 
 def build_flex_block_mask(
@@ -142,6 +148,7 @@ def build_flex_block_mask(
         options.cache_semantics.value, options.answer_sees_memory,
     )
     if use_cache and cache_key in _BLOCK_MASK_CACHE:
+        _BLOCK_MASK_CACHE.move_to_end(cache_key)
         return _BLOCK_MASK_CACHE[cache_key]
     mask = _COMPILED_CREATE_BLOCK_MASK(
         mask_mod_from_metadata(metadata, options), B=metadata.batch_size, H=None,
@@ -150,6 +157,9 @@ def build_flex_block_mask(
     )
     if use_cache:
         _BLOCK_MASK_CACHE[cache_key] = mask
+        _BLOCK_MASK_CACHE.move_to_end(cache_key)
+        while len(_BLOCK_MASK_CACHE) > _BLOCK_MASK_CACHE_LIMIT:
+            _BLOCK_MASK_CACHE.popitem(last=False)
     return mask
 
 

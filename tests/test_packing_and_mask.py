@@ -1,7 +1,7 @@
 import pytest
 
 from tool_context.masks.reference import MaskOptions, build_reference_mask, visible
-from tool_context.packing import ByteTokenizer, PackedEpisode, TokenRole, pack_episode
+from tool_context.packing import ByteTokenizer, PackedEpisode, TokenRole, pack_episode, pack_teacher_forcing_episode
 from tool_context.schema import Anchor, CacheSemantics, EpisodeGraph, LayoutSpec, ToolBlock, ValidationError
 
 
@@ -143,3 +143,16 @@ def test_byte_tokenizer_identity_is_versioned():
     tokenizer = ByteTokenizer()
     assert tokenizer.identity == {"kind": "byte", "version": 1}
     assert tokenizer.encode("A") == [68]
+
+
+def test_teacher_forcing_prefix_and_optional_strips_are_explicit():
+    result = pack_teacher_forcing_episode(
+        make_episode(), make_layout(), WordTokenizer(), selected_blocks={"left"},
+        answer_prefix="answer prefix", enable_memory_tokens=False, enable_router_tokens=False,
+    )
+    packed = result.packed
+    assert result.prediction_positions[0] + 1 == result.target_positions[0]
+    assert all(packed.token_role[index] == TokenRole.A for index in result.prediction_positions)
+    assert all(packed.valid_token[index] for index in result.prediction_positions)
+    assert not any(role in (TokenRole.M, TokenRole.R) for role in packed.token_role)
+    assert tuple(packed.input_ids[index] for index in result.target_positions) == result.target_token_ids

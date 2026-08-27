@@ -10,4 +10,5 @@ dist/
 *.egg-info/
 artifacts/corpora/
 artifacts/models/
+artifacts/teacher_cache/
 artifacts/*.jsonl
